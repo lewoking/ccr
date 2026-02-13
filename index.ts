@@ -3,24 +3,46 @@ import { formatAnthropicToOpenAI } from './formatRequest';
 import { streamOpenAIToAnthropic } from './streamResponse';
 import { formatOpenAIToAnthropic } from './formatResponse';
 
+const CORS_HEADERS: Record<string, string> = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Api-Key, anthropic-version, anthropic-beta',
+  'Access-Control-Max-Age': '86400',
+  Vary: 'Origin, Access-Control-Request-Method, Access-Control-Request-Headers',
+};
+
+const DEFAULT_OPENAI_BASE_URL = 'https://openrouter.ai/api/v1';
+
 function withCors(response: Response): Response {
-  const newResponse = new Response(response.body, response);
-  newResponse.headers.set('Access-Control-Allow-Origin', '*');
-  newResponse.headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  newResponse.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Api-Key');
-  newResponse.headers.set('Access-Control-Max-Age', '86400');
-  return newResponse;
+  const headers = new Headers(response.headers);
+  Object.entries(CORS_HEADERS).forEach(([key, value]) => headers.set(key, value));
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
 }
 
-function jsonResponse(data: any, status: number = 200): Response {
+function jsonResponse(data: unknown, status = 200): Response {
   return withCors(
     new Response(JSON.stringify(data), {
       status,
-      headers: {
-        'Content-Type': 'application/json; charset=utf-8',
-      },
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
     }),
   );
+}
+
+function normalizeBaseUrl(baseUrl?: string): string {
+  if (!baseUrl) {
+    return DEFAULT_OPENAI_BASE_URL;
+  }
+
+  const normalized = baseUrl.trim().replace(/\/+$/, '');
+  return normalized || DEFAULT_OPENAI_BASE_URL;
+}
+
+function resolveUpstreamBaseUrl(env: Env): string {
+  return normalizeBaseUrl(env.OPENAI_BASE_URL || env.OPENROUTER_BASE_URL || DEFAULT_OPENAI_BASE_URL);
 }
 
 export default {
@@ -59,7 +81,7 @@ export default {
       const bearerToken =
         request.headers.get('X-Api-Key') || request.headers.get('Authorization')?.replace('Bearer ', '');
 
-      const baseUrl = env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1';
+      const baseUrl = resolveUpstreamBaseUrl(env);
       const upstreamResponse = await fetch(`${baseUrl}/chat/completions`, {
         method: 'POST',
         headers: {
