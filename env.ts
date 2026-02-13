@@ -1,3 +1,4 @@
 export interface Env {
-  OPENROUTER_BASE_URL: string;
+  OPENAI_BASE_URL?: string;
+  OPENROUTER_BASE_URL?: string;
 }

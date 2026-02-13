@@ -1,11 +1,14 @@
-name = "y-router"
+name = "ccr"
 main = "index.ts"
-compatibility_date = "2025-05-30"
+compatibility_date = "2026-02-13"
 routes = [
-  { pattern = "cc.yovy.app", custom_domain = true }
 ]
 
 # Enable logging
 [observability]
 enabled = true
 head_sampling_rate = 1
+
+
+[vars]
+OPENAI_BASE_URL = "https://openrouter.ai/api/v1"

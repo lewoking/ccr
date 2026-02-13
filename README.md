@@ -37,29 +37,20 @@ npm install -g @anthropic-ai/claude-code
 **Step 3:** Configure environment variables in your shell config (`~/.bashrc` or `~/.zshrc`):
 
 ```bash
-# For quick testing, you can use our shared instance. For daily use, deploy your own instance for better reliability.
-export ANTHROPIC_BASE_URL="https://cc.yovy.app"
-export ANTHROPIC_API_KEY="your-openrouter-api-key"
-export ANTHROPIC_CUSTOM_HEADERS="x-api-key: $ANTHROPIC_API_KEY"
+wrangler deploy
 ```
 
-**Optional:** Configure specific models (browse models at [openrouter.ai/models](https://openrouter.ai/models)):
+### 3) 可选配置
+
+默认上游：`https://openrouter.ai/api/v1`
+
+如果要自定义上游：
+
 ```bash
-export ANTHROPIC_MODEL="moonshotai/kimi-k2"
-export ANTHROPIC_SMALL_FAST_MODEL="google/gemini-2.5-flash"
+wrangler secret put OPENROUTER_BASE_URL
 ```
 
-**Step 4:** Reload your shell and run Claude Code:
-```bash
-source ~/.bashrc
-claude
-```
-
-That's it! Claude Code will now use OpenRouter's models through y-router.
-
-### Multiple Configurations
-
-To maintain multiple Claude Code configurations for different providers or models, use shell aliases:
+## 本地开发
 
 ```bash
 npm run dev

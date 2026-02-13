@@ -44,8 +44,8 @@ export default {
         request.headers.get('X-Api-Key') || request.headers.get('Authorization')?.replace('Bearer ', '');
 
       const baseUrl = env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1';
-      const openaiResponse = await fetch(`${baseUrl}/chat/completions`, {
-        method: "POST",
+      const upstreamResponse = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${bearerToken}`,
