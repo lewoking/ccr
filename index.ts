@@ -2,10 +2,26 @@ import { Env } from './env';
 import { formatAnthropicToOpenAI } from './formatRequest';
 import { streamOpenAIToAnthropic } from './streamResponse';
 import { formatOpenAIToAnthropic } from './formatResponse';
-import { indexHtml } from './indexHtml';
-import { termsHtml } from './termsHtml';
-import { privacyHtml } from './privacyHtml';
-import { installSh } from './installSh';
+
+function withCors(response: Response): Response {
+  const newResponse = new Response(response.body, response);
+  newResponse.headers.set('Access-Control-Allow-Origin', '*');
+  newResponse.headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  newResponse.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Api-Key');
+  newResponse.headers.set('Access-Control-Max-Age', '86400');
+  return newResponse;
+}
+
+function jsonResponse(data: any, status: number = 200): Response {
+  return withCors(
+    new Response(JSON.stringify(data), {
+      status,
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+      },
+    }),
+  );
+}
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
