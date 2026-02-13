@@ -3,19 +3,26 @@ import { formatAnthropicToOpenAI } from './formatRequest';
 import { streamOpenAIToAnthropic } from './streamResponse';
 import { formatOpenAIToAnthropic } from './formatResponse';
 
-const CORS_HEADERS: Record<string, string> = {
+const BASE_CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Api-Key, anthropic-version, anthropic-beta',
+  'Access-Control-Allow-Headers':
+    'Content-Type, Authorization, X-Api-Key, anthropic-version, anthropic-beta, anthropic-dangerous-direct-browser-access, user-agent, x-stainless-arch, x-stainless-helper-method, x-stainless-lang, x-stainless-os, x-stainless-package-version, x-stainless-retry-count, x-stainless-runtime, x-stainless-runtime-version, x-stainless-timeout',
   'Access-Control-Max-Age': '86400',
   Vary: 'Origin, Access-Control-Request-Method, Access-Control-Request-Headers',
 };
 
 const DEFAULT_OPENAI_BASE_URL = 'https://openrouter.ai/api/v1';
 
-function withCors(response: Response): Response {
+function withCors(response: Response, request?: Request): Response {
   const headers = new Headers(response.headers);
-  Object.entries(CORS_HEADERS).forEach(([key, value]) => headers.set(key, value));
+  Object.entries(BASE_CORS_HEADERS).forEach(([key, value]) => headers.set(key, value));
+
+  const requestedHeaders = request?.headers.get('Access-Control-Request-Headers');
+  if (requestedHeaders) {
+    headers.set('Access-Control-Allow-Headers', requestedHeaders);
+  }
+
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
@@ -23,12 +30,13 @@ function withCors(response: Response): Response {
   });
 }
 
-function jsonResponse(data: unknown, status = 200): Response {
+function jsonResponse(data: unknown, status = 200, request?: Request): Response {
   return withCors(
     new Response(JSON.stringify(data), {
       status,
       headers: { 'Content-Type': 'application/json; charset=utf-8' },
     }),
+    request,
   );
 }
 
@@ -50,7 +58,7 @@ export default {
     const url = new URL(request.url);
 
     if (request.method === 'OPTIONS') {
-      return withCors(new Response(null, { status: 204 }));
+      return withCors(new Response(null, { status: 204 }), request);
     }
 
     if (url.pathname !== '/v1/messages') {
@@ -61,6 +69,7 @@ export default {
           allowed_methods: ['POST', 'OPTIONS'],
         },
         404,
+        request,
       );
     }
 
@@ -72,6 +81,7 @@ export default {
           allowed_methods: ['POST', 'OPTIONS'],
         },
         405,
+        request,
       );
     }
 
@@ -99,6 +109,7 @@ export default {
               'Content-Type': upstreamResponse.headers.get('Content-Type') || 'application/json; charset=utf-8',
             },
           }),
+          request,
         );
       }
 
@@ -112,12 +123,13 @@ export default {
               Connection: 'keep-alive',
             },
           }),
+          request,
         );
       }
 
       const openaiData = await upstreamResponse.json();
       const anthropicResponse = formatOpenAIToAnthropic(openaiData, openaiRequest.model);
-      return jsonResponse(anthropicResponse);
+      return jsonResponse(anthropicResponse, 200, request);
     } catch (error) {
       return jsonResponse(
         {
@@ -126,6 +138,7 @@ export default {
           details: error instanceof Error ? error.message : 'Unknown error',
         },
         400,
+        request,
       );
     }
   },
