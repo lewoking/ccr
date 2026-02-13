@@ -2,33 +2,10 @@ import { Env } from './env';
 import { formatAnthropicToOpenAI } from './formatRequest';
 import { streamOpenAIToAnthropic } from './streamResponse';
 import { formatOpenAIToAnthropic } from './formatResponse';
-
-const CORS_HEADERS: Record<string, string> = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Api-Key, anthropic-version, anthropic-beta',
-  'Access-Control-Max-Age': '86400',
-  Vary: 'Origin, Access-Control-Request-Method, Access-Control-Request-Headers',
-};
-
-function withCors(response: Response): Response {
-  const headers = new Headers(response.headers);
-  Object.entries(CORS_HEADERS).forEach(([key, value]) => headers.set(key, value));
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers,
-  });
-}
-
-function jsonResponse(data: unknown, status = 200): Response {
-  return withCors(
-    new Response(JSON.stringify(data), {
-      status,
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-    }),
-  );
-}
+import { indexHtml } from './indexHtml';
+import { termsHtml } from './termsHtml';
+import { privacyHtml } from './privacyHtml';
+import { installSh } from './installSh';
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -67,8 +44,8 @@ export default {
         request.headers.get('X-Api-Key') || request.headers.get('Authorization')?.replace('Bearer ', '');
 
       const baseUrl = env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1';
-      const upstreamResponse = await fetch(`${baseUrl}/chat/completions`, {
-        method: 'POST',
+      const openaiResponse = await fetch(`${baseUrl}/chat/completions`, {
+        method: "POST",
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${bearerToken}`,
