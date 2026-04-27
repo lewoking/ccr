@@ -2,6 +2,7 @@ import { Env } from './env';
 import { formatAnthropicToOpenAI } from './formatRequest';
 import { streamOpenAIToAnthropic } from './streamResponse';
 import { formatOpenAIToAnthropic } from './formatResponse';
+import { detectProvider, resolveProviderConfig, ProviderType, parseGeminiModelMapping } from './providers';
 
 const BASE_CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
@@ -87,16 +88,39 @@ export default {
 
     try {
       const anthropicRequest = await request.json();
-      const openaiRequest = formatAnthropicToOpenAI(anthropicRequest);
+      
+      // Extract API key from Authorization or X-Api-Key header
       const bearerToken =
-        request.headers.get('X-Api-Key') || request.headers.get('Authorization')?.replace('Bearer ', '');
+        request.headers.get('X-Api-Key') ||
+        request.headers.get('Authorization')?.replace('Bearer ', '');
+      
+      if (!bearerToken) {
+        return jsonResponse(
+          {
+            error: 'Unauthorized',
+            message: 'API key is required. Provide via Authorization header or X-Api-Key header.',
+          },
+          401,
+          request,
+        );
+      }
 
-      const baseUrl = resolveUpstreamBaseUrl(env);
-      const upstreamResponse = await fetch(`${baseUrl}/chat/completions`, {
+      // Detect provider from API key prefix
+      const provider = detectProvider(bearerToken);
+      const providerConfig = resolveProviderConfig(provider, bearerToken);
+      
+      // Parse Gemini model mapping from environment (only needed for Gemini)
+      // OpenRouter natively supports Claude models, no mapping needed
+      const geminiModelMapping = parseGeminiModelMapping(env.GEMINI_MODEL_MAPPING);
+      
+      // Transform to OpenAI format with provider-aware model mapping
+      const openaiRequest = formatAnthropicToOpenAI(anthropicRequest, provider, geminiModelMapping);
+
+      const upstreamResponse = await fetch(`${providerConfig.baseUrl}/chat/completions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${bearerToken}`,
+          Authorization: `Bearer ${providerConfig.apiKey}`,
         },
         body: JSON.stringify(openaiRequest),
       });

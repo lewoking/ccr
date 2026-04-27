@@ -98,23 +98,24 @@ function validateOpenAIToolCalls(messages: any[]): any[] {
   return validatedMessages;
 }
 
-export function mapModel(anthropicModel: string): string {
-  // If model already contains '/', it's an OpenRouter model ID - return as-is
-  if (anthropicModel.includes('/')) {
-    return anthropicModel;
+import { mapModelForProvider, ProviderType, DEFAULT_GEMINI_MODEL_MAPPING } from './providers';
+
+export function mapModel(
+  anthropicModel: string,
+  provider?: ProviderType,
+  geminiModelMapping?: typeof DEFAULT_GEMINI_MODEL_MAPPING,
+): string {
+  if (!provider) {
+    provider = 'openrouter';
   }
-  
-  if (anthropicModel.includes('haiku')) {
-    return 'anthropic/claude-3.5-haiku';
-  } else if (anthropicModel.includes('sonnet')) {
-    return 'anthropic/claude-sonnet-4';
-  } else if (anthropicModel.includes('opus')) {
-    return 'anthropic/claude-opus-4';
-  }
-  return anthropicModel;
+  return mapModelForProvider(anthropicModel, provider, geminiModelMapping);
 }
 
-export function formatAnthropicToOpenAI(body: MessageCreateParamsBase): any {
+export function formatAnthropicToOpenAI(
+  body: MessageCreateParamsBase,
+  provider?: ProviderType,
+  geminiModelMapping?: typeof DEFAULT_GEMINI_MODEL_MAPPING,
+): any {
   const { model, messages, system = [], temperature, tools, stream } = body;
 
   const openAIMessages = Array.isArray(messages)
@@ -223,7 +224,7 @@ export function formatAnthropicToOpenAI(body: MessageCreateParamsBase): any {
       }];
 
   const data: any = {
-    model: mapModel(model),
+    model: mapModel(model, provider, geminiModelMapping),
     messages: [...systemMessages, ...openAIMessages],
     temperature,
     stream,
