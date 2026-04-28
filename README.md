@@ -20,14 +20,7 @@
 
 ## 快速开始
 
-### 1) 部署
-
-```bash
-npm install
-wrangler deploy
-```
-
-### 2) 配置（可选）
+### 配置（可选）
 
 #### 自定义 Base URL
 
@@ -138,8 +131,17 @@ curl -X POST "https://<your-worker-domain>/v1/messages" \
 ## 本地开发
 
 ```bash
+npm install
 npm run dev
 ```
+
+## 自动部署
+
+代码推送到 `main` 分支时，GitHub Actions 会自动构建并部署到 CloudFlare Workers。
+
+**需要配置的 GitHub Secrets**：
+- `CLOUDFLARE_API_TOKEN`: CloudFlare API Token
+- `CLOUDFLARE_ACCOUNT_ID`: CloudFlare Account ID
 
 ## 工作流程
 
