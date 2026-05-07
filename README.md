@@ -1,60 +1,43 @@
 # Claude Code Router
 
-为 Claude Code / Claude in Excel 提供的 API 网关，支持多个 LLM 服务商（OpenRouter 和 Gemini）。
+为 Claude Code / Claude in Excel 提供的 API 网关，支持三种路径模式：Claude 兼容、Gemini 官方、OpenRouter 官方。
 
 ## 功能特性
 
-- ✅ **多服务商支持**：自动识别 API Key 并路由到相应服务商
-- ✅ **智能模型映射**：自动转换 Claude 模型为目标服务商的等价模型
-- ✅ **零代码升级**：新模型发布时通过环境变量配置，无需重新部署
-- ✅ **OpenRouter 直通**：Claude 模型自动加 `anthropic/` 前缀
-- ✅ **Gemini 智能映射**：Claude 模型自动映射到 Gemini 2.5 系列
+- ✅ **路径识别路由**：按请求路径自动识别 Claude / Gemini / OpenRouter
+- ✅ **Claude 兼容转换**：`/v1/messages` 保持 Anthropic 协议，自动转换并转发
+- ✅ **官方 API 直通**：Gemini 与 OpenRouter 官方路径仅做网络中转，不改请求结构
+- ✅ **多服务商密钥识别**：Claude 路径下按密钥格式自动选择 OpenRouter 或 Gemini(OpenAI兼容)
 - ✅ **完整 CORS 支持**：支持浏览器跨域调用
 
-## 服务商支持
+## 路由规则
 
-| 服务商 | API Key 前缀 | 识别方式 | 模型映射 |
-|--------|-----------|--------|--------|
-| **OpenRouter** | `sk-or-v1-*` | 自动检测 | Claude → `anthropic/claude-*` |
-| **Gemini** | `AI*` | 自动检测 | Claude → Gemini 2.5 系列 |
+### 1) Claude 路径（保持当前业务流程）
 
-## 快速开始
+- 路径：`POST /v1/messages`
+- 行为：
+  - 读取 `Authorization` 或 `X-Api-Key`
+  - 按密钥前缀识别上游：
+    - `sk-or-v1-*` → OpenRouter OpenAI 兼容
+    - `AI*` → Gemini OpenAI 兼容
+  - 将 Anthropic 请求转换为 OpenAI Chat Completions
+  - 返回再转换回 Anthropic 响应
 
-### 配置（可选）
+### 2) Gemini 官方路径（仅网络中转）
 
-#### 自定义 Base URL
+- 路径：`/v1beta/*`
+- 行为：原样转发到 `https://generativelanguage.googleapis.com`
+- 说明：不做协议与字段转换
 
-```bash
-# OpenRouter（默认：https://openrouter.ai/api/v1）
-wrangler secret put OPENROUTER_BASE_URL
+### 3) OpenRouter 官方路径（仅网络中转）
 
-# Gemini（默认：https://generativelanguage.googleapis.com/v1beta/openai/）
-wrangler secret put GEMINI_BASE_URL
-```
+- 路径：`/api/v1/*` 或 `/v1/*`（排除 `/v1/messages`）
+- 行为：原样转发到 `https://openrouter.ai`
+- 说明：不做协议与字段转换
 
-#### 更新 Gemini 模型映射
+## 使用示例
 
-当 Gemini 发布新模型版本时，只需更新环境变量（`wrangler.toml`）：
-
-```toml
-[env.production]
-vars = { 
-  GEMINI_MODEL_MAPPING = '{"opus":"gemini-3-pro","sonnet":"gemini-3-flash","haiku":"gemini-3-flash-lite"}'
-}
-```
-
-默认映射（Gemini 2.5 系列）：
-```json
-{
-  "opus": "gemini-2.5-pro",
-  "sonnet": "gemini-2.5-flash",
-  "haiku": "gemini-2.5-flash-lite"
-}
-```
-
-## 使用方式
-
-### OpenRouter 请求
+### Claude 兼容请求
 
 ```bash
 curl -X POST "https://<your-worker-domain>/v1/messages" \
@@ -67,102 +50,33 @@ curl -X POST "https://<your-worker-domain>/v1/messages" \
   }'
 ```
 
-网关自动转换为：
-```json
-{
-  "model": "anthropic/claude-opus-4",
-  "messages": [...],
-  "max_tokens": 1024
-}
-```
-
-### Gemini 请求
+### Gemini 官方请求直通
 
 ```bash
-curl -X POST "https://<your-worker-domain>/v1/messages" \
+curl -X POST "https://<your-worker-domain>/v1beta/models/gemini-2.5-flash:generateContent?key=<GEMINI_KEY>" \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer AIxxxxx" \
   -d '{
-    "model": "claude-opus-4",
-    "messages": [{"role": "user", "content": "hello"}],
-    "max_tokens": 1024
+    "contents": [{"parts": [{"text": "hello"}]}]
   }'
 ```
 
-网关自动转换为：
-```json
-{
-  "model": "gemini-2.5-pro",
-  "messages": [...],
-  "max_tokens": 1024
-}
+### OpenRouter 官方请求直通
+
+```bash
+curl -X POST "https://<your-worker-domain>/api/v1/chat/completions" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-or-v1-xxxxx" \
+  -d '{
+    "model": "openai/gpt-4o-mini",
+    "messages": [{"role": "user", "content": "hello"}]
+  }'
 ```
-
-## 模型映射规则
-
-网关自动识别 Claude 模型层级并转换：
-
-| Claude 模型 | OpenRouter | Gemini |
-|-----------|-----------|--------|
-| `claude-opus-*` | `anthropic/claude-opus-*` | `gemini-2.5-pro` |
-| `claude-sonnet-*` | `anthropic/claude-sonnet-*` | `gemini-2.5-flash` |
-| `claude-haiku-*` | `anthropic/claude-3.5-haiku` | `gemini-2.5-flash-lite` |
-
-## Claude Code 配置
-
-1. **Base URL**: 指向网关域名
-   ```
-   https://<your-worker-domain>
-   ```
-
-2. **Endpoint**: `/v1/messages`
-
-3. **API Key**: 支持两种传入方式
-   - HTTP 头 `X-Api-Key`
-   - HTTP 头 `Authorization: Bearer <api-key>`
-
-4. **模型选择**: 直接使用 Claude 模型名
-   ```
-   claude-opus-4
-   claude-sonnet-4
-   claude-haiku-3
-   ```
 
 ## 本地开发
 
 ```bash
 npm install
 npm run dev
-```
-
-## 自动部署
-
-代码推送到 `main` 分支时，GitHub Actions 会自动构建并部署到 CloudFlare Workers。
-
-**需要配置的 GitHub Secrets**：
-- `CLOUDFLARE_API_TOKEN`: CloudFlare API Token
-- `CLOUDFLARE_ACCOUNT_ID`: CloudFlare Account ID
-
-## 工作流程
-
-```
-Claude Code 请求
-    ↓
-读取 API Key
-    ↓
-检测提供商 (OpenRouter/Gemini)
-    ↓
-识别模型层级 (opus/sonnet/haiku)
-    ↓
-转换模型名称
-    ↓
-转换为 OpenAI 格式
-    ↓
-转发到目标服务商
-    ↓
-转换响应为 Claude 格式
-    ↓
-返回结果
 ```
 
 ## License
