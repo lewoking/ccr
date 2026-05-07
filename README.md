@@ -12,7 +12,7 @@
 
 ## 路由规则
 
-### 1) Claude 路径（保持当前业务流程）
+### 1) Claude 路径
 
 - 路径：`POST /v1/messages`
 - 行为：
@@ -23,13 +23,13 @@
   - 将 Anthropic 请求转换为 OpenAI Chat Completions
   - 返回再转换回 Anthropic 响应
 
-### 2) Gemini 官方路径（仅网络中转）
+### 2) Gemini 官方路径
 
 - 路径：`/v1beta/*`
 - 行为：原样转发到 `https://generativelanguage.googleapis.com`
 - 说明：不做协议与字段转换
 
-### 3) OpenRouter 官方路径（仅网络中转）
+### 3) OpenRouter 官方路径
 
 - 路径：`/api/v1/*` 或 `/v1/*`（排除 `/v1/messages`）
 - 行为：原样转发到 `https://openrouter.ai`
@@ -72,12 +72,6 @@ curl -X POST "https://<your-worker-domain>/api/v1/chat/completions" \
   }'
 ```
 
-## 本地开发
-
-```bash
-npm install
-npm run dev
-```
 
 ## License
 
