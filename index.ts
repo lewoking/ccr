@@ -15,6 +15,7 @@ const BASE_CORS_HEADERS: Record<string, string> = {
 
 const GEMINI_OFFICIAL_BASE_URL = 'https://generativelanguage.googleapis.com';
 const OPENROUTER_OFFICIAL_BASE_URL = 'https://openrouter.ai';
+const PATH_PROXY_ORIGIN_COOKIE = 'ccr_path_proxy_origin';
 
 function withCors(response: Response, request?: Request): Response {
   const headers = new Headers(response.headers);
@@ -56,7 +57,7 @@ function isOpenRouterPath(pathname: string): boolean {
   return pathname.startsWith('/api/v1/') || (pathname.startsWith('/v1/') && pathname !== '/v1/messages');
 }
 
-function getPathProxyUrl(originalUrl: URL): string | null {
+function getPathProxyTarget(originalUrl: URL): URL | null {
   const target = `${originalUrl.pathname}${originalUrl.search}`;
   if (!target.startsWith('/https://')) {
     return null;
@@ -67,35 +68,109 @@ function getPathProxyUrl(originalUrl: URL): string | null {
     if (upstreamUrl.protocol !== 'https:' || !upstreamUrl.hostname) {
       return null;
     }
-    return upstreamUrl.toString();
+    return upstreamUrl;
   } catch {
     return null;
   }
+}
+
+function getCookieValue(request: Request, name: string): string | null {
+  const cookieHeader = request.headers.get('Cookie');
+  if (!cookieHeader) {
+    return null;
+  }
+
+  const cookies = cookieHeader.split(';');
+  for (const cookie of cookies) {
+    const [cookieName, ...valueParts] = cookie.trim().split('=');
+    if (cookieName === name) {
+      return valueParts.join('=');
+    }
+  }
+  return null;
+}
+
+function getPathProxyOrigin(request: Request): string | null {
+  const cookieValue = getCookieValue(request, PATH_PROXY_ORIGIN_COOKIE);
+  if (!cookieValue) {
+    return null;
+  }
+
+  try {
+    const upstreamOrigin = new URL(decodeURIComponent(cookieValue));
+    if (upstreamOrigin.protocol !== 'https:' || !upstreamOrigin.hostname) {
+      return null;
+    }
+    return upstreamOrigin.origin;
+  } catch {
+    return null;
+  }
+}
+
+function getFallbackPathProxyUrl(request: Request): string | null {
+  const originalUrl = new URL(request.url);
+  const upstreamOrigin = getPathProxyOrigin(request);
+  if (!upstreamOrigin) {
+    return null;
+  }
+
+  return new URL(`${originalUrl.pathname}${originalUrl.search}`, upstreamOrigin).toString();
 }
 
 function buildProxyUrl(baseUrl: string, originalUrl: URL): string {
   return `${baseUrl.replace(/\/+$/, '')}${originalUrl.pathname}${originalUrl.search}`;
 }
 
+function removeCookieValue(cookieHeader: string, name: string): string {
+  return cookieHeader
+    .split(';')
+    .map((cookie) => cookie.trim())
+    .filter((cookie) => cookie && !cookie.startsWith(`${name}=`))
+    .join('; ');
+}
+
 function copyRequestHeaders(request: Request): Headers {
   const headers = new Headers(request.headers);
   headers.delete('host');
   headers.delete('content-length');
+
+  const cookieHeader = headers.get('Cookie');
+  if (cookieHeader) {
+    const forwardedCookies = removeCookieValue(cookieHeader, PATH_PROXY_ORIGIN_COOKIE);
+    if (forwardedCookies) {
+      headers.set('Cookie', forwardedCookies);
+    } else {
+      headers.delete('Cookie');
+    }
+  }
+
   return headers;
 }
 
-async function proxyRawRequestToUrl(request: Request, upstreamUrl: string): Promise<Response> {
+async function proxyRawRequestToUrl(
+  request: Request,
+  upstreamUrl: string,
+  pathProxyOrigin?: string,
+): Promise<Response> {
   const upstreamResponse = await fetch(upstreamUrl, {
     method: request.method,
     headers: copyRequestHeaders(request),
     body: request.method === 'GET' || request.method === 'HEAD' ? undefined : request.body,
     redirect: 'follow',
   });
+  const headers = new Headers(upstreamResponse.headers);
+
+  if (pathProxyOrigin) {
+    headers.append(
+      'Set-Cookie',
+      `${PATH_PROXY_ORIGIN_COOKIE}=${encodeURIComponent(pathProxyOrigin)}; Path=/; Secure; HttpOnly; SameSite=Lax`,
+    );
+  }
 
   return new Response(upstreamResponse.body, {
     status: upstreamResponse.status,
     statusText: upstreamResponse.statusText,
-    headers: upstreamResponse.headers,
+    headers,
   });
 }
 
@@ -111,9 +186,12 @@ export default {
       return withCors(new Response(null, { status: 204 }), request);
     }
 
-    const pathProxyUrl = getPathProxyUrl(url);
-    if (pathProxyUrl) {
-      return withCors(await proxyRawRequestToUrl(request, pathProxyUrl), request);
+    const pathProxyTarget = getPathProxyTarget(url);
+    if (pathProxyTarget) {
+      return withCors(
+        await proxyRawRequestToUrl(request, pathProxyTarget.toString(), pathProxyTarget.origin),
+        request,
+      );
     }
 
     if (isClaudePath(url.pathname)) {
@@ -207,6 +285,14 @@ export default {
 
     if (isGeminiPath(url.pathname)) {
       return withCors(await proxyRawRequest(request, GEMINI_OFFICIAL_BASE_URL), request);
+    }
+
+    const fallbackPathProxyUrl = getFallbackPathProxyUrl(request);
+    if (fallbackPathProxyUrl) {
+      return withCors(
+        await proxyRawRequestToUrl(request, fallbackPathProxyUrl, new URL(fallbackPathProxyUrl).origin),
+        request,
+      );
     }
 
     return jsonResponse(
