@@ -56,6 +56,23 @@ function isOpenRouterPath(pathname: string): boolean {
   return pathname.startsWith('/api/v1/') || (pathname.startsWith('/v1/') && pathname !== '/v1/messages');
 }
 
+function getPathProxyUrl(originalUrl: URL): string | null {
+  const target = `${originalUrl.pathname}${originalUrl.search}`;
+  if (!target.startsWith('/https://')) {
+    return null;
+  }
+
+  try {
+    const upstreamUrl = new URL(target.slice(1));
+    if (upstreamUrl.protocol !== 'https:' || !upstreamUrl.hostname) {
+      return null;
+    }
+    return upstreamUrl.toString();
+  } catch {
+    return null;
+  }
+}
+
 function buildProxyUrl(baseUrl: string, originalUrl: URL): string {
   return `${baseUrl.replace(/\/+$/, '')}${originalUrl.pathname}${originalUrl.search}`;
 }
@@ -67,8 +84,7 @@ function copyRequestHeaders(request: Request): Headers {
   return headers;
 }
 
-async function proxyRawRequest(request: Request, baseUrl: string): Promise<Response> {
-  const upstreamUrl = buildProxyUrl(baseUrl, new URL(request.url));
+async function proxyRawRequestToUrl(request: Request, upstreamUrl: string): Promise<Response> {
   const upstreamResponse = await fetch(upstreamUrl, {
     method: request.method,
     headers: copyRequestHeaders(request),
@@ -83,12 +99,21 @@ async function proxyRawRequest(request: Request, baseUrl: string): Promise<Respo
   });
 }
 
+async function proxyRawRequest(request: Request, baseUrl: string): Promise<Response> {
+  return proxyRawRequestToUrl(request, buildProxyUrl(baseUrl, new URL(request.url)));
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
     if (request.method === 'OPTIONS') {
       return withCors(new Response(null, { status: 204 }), request);
+    }
+
+    const pathProxyUrl = getPathProxyUrl(url);
+    if (pathProxyUrl) {
+      return withCors(await proxyRawRequestToUrl(request, pathProxyUrl), request);
     }
 
     if (isClaudePath(url.pathname)) {
