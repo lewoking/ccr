@@ -212,7 +212,7 @@ export default {
     return jsonResponse(
       {
         error: 'Not Found',
-        message: 'Supported paths: /v1/messages (Claude), /v1beta/* (Gemini official), /api/v1/* or /v1/* except /v1/messages (OpenRouter official).',
+        message: 'Supported paths: /v1/messages, /v1beta/* , /api/v1/* or /v1/*.',
       },
       404,
       request,
