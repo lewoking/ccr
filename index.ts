@@ -1,8 +1,5 @@
 import { Env } from './env';
-import { formatAnthropicToOpenAI } from './formatRequest';
-import { streamOpenAIToAnthropic } from './streamResponse';
-import { formatOpenAIToAnthropic } from './formatResponse';
-import { detectProvider, resolveProviderConfig, parseGeminiModelMapping } from './providers';
+import { detectProvider } from './providers';
 
 const BASE_CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
@@ -178,8 +175,41 @@ async function proxyRawRequest(request: Request, baseUrl: string): Promise<Respo
   return proxyRawRequestToUrl(request, buildProxyUrl(baseUrl, new URL(request.url)));
 }
 
+async function buildOpenRouterMessagesRequest(
+  request: Request,
+  targetUrl: string,
+): Promise<Request> {
+  if (request.method === 'GET' || request.method === 'HEAD') {
+    return new Request(targetUrl, {
+      method: request.method,
+      headers: copyRequestHeaders(request),
+    });
+  }
+
+  const contentType = request.headers.get('Content-Type') || '';
+  if (!contentType.includes('application/json')) {
+    return new Request(targetUrl, {
+      method: request.method,
+      headers: copyRequestHeaders(request),
+      body: request.body,
+    });
+  }
+
+  const payload = await request.clone().json();
+  const model = typeof payload?.model === 'string' ? payload.model : '';
+  if (model && !model.includes('/') && model.toLowerCase().includes('claude')) {
+    payload.model = `anthropic/${model}`;
+  }
+
+  return new Request(targetUrl, {
+    method: request.method,
+    headers: copyRequestHeaders(request),
+    body: JSON.stringify(payload),
+  });
+}
+
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, _env: Env): Promise<Response> {
     const url = new URL(request.url);
 
     if (request.method === 'OPTIONS') {
@@ -208,8 +238,6 @@ export default {
       }
 
       try {
-        const anthropicRequest = await request.json();
-
         const bearerToken = request.headers.get('X-Api-Key') || request.headers.get('Authorization')?.replace('Bearer ', '');
 
         if (!bearerToken) {
@@ -224,48 +252,28 @@ export default {
         }
 
         const provider = detectProvider(bearerToken);
-        const providerConfig = resolveProviderConfig(provider, bearerToken);
-        const geminiModelMapping = parseGeminiModelMapping(env.GEMINI_MODEL_MAPPING);
-        const openaiRequest = formatAnthropicToOpenAI(anthropicRequest, provider, geminiModelMapping);
-
-        const upstreamResponse = await fetch(`${providerConfig.baseUrl}/chat/completions`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${providerConfig.apiKey}`,
-          },
-          body: JSON.stringify(openaiRequest),
-        });
-
-        if (!upstreamResponse.ok) {
-          return withCors(
-            new Response(await upstreamResponse.text(), {
-              status: upstreamResponse.status,
-              headers: {
-                'Content-Type': upstreamResponse.headers.get('Content-Type') || 'application/json; charset=utf-8',
-              },
-            }),
+        if (provider !== 'openrouter') {
+          return jsonResponse(
+            {
+              error: 'Unsupported Provider',
+              message: '/v1/messages only supports OpenRouter API keys (sk-or-v1-*).',
+            },
+            400,
             request,
           );
         }
 
-        if (openaiRequest.stream) {
-          const anthropicStream = streamOpenAIToAnthropic(upstreamResponse.body as ReadableStream, openaiRequest.model);
-          return withCors(
-            new Response(anthropicStream, {
-              headers: {
-                'Content-Type': 'text/event-stream',
-                'Cache-Control': 'no-cache',
-                Connection: 'keep-alive',
-              },
-            }),
-            request,
-          );
-        }
-
-        const openaiData = await upstreamResponse.json();
-        const anthropicResponse = formatOpenAIToAnthropic(openaiData, openaiRequest.model);
-        return jsonResponse(anthropicResponse, 200, request);
+        const targetUrl = `${OPENROUTER_OFFICIAL_BASE_URL}/api/v1/messages${url.search}`;
+        const upstreamRequest = await buildOpenRouterMessagesRequest(request, targetUrl);
+        const upstreamResponse = await fetch(upstreamRequest, { redirect: 'follow' });
+        return withCors(
+          new Response(upstreamResponse.body, {
+            status: upstreamResponse.status,
+            statusText: upstreamResponse.statusText,
+            headers: upstreamResponse.headers,
+          }),
+          request,
+        );
       } catch (error) {
         return jsonResponse(
           {
