@@ -175,8 +175,41 @@ async function proxyRawRequest(request: Request, baseUrl: string): Promise<Respo
   return proxyRawRequestToUrl(request, buildProxyUrl(baseUrl, new URL(request.url)));
 }
 
+async function buildOpenRouterMessagesRequest(
+  request: Request,
+  targetUrl: string,
+): Promise<Request> {
+  if (request.method === 'GET' || request.method === 'HEAD') {
+    return new Request(targetUrl, {
+      method: request.method,
+      headers: copyRequestHeaders(request),
+    });
+  }
+
+  const contentType = request.headers.get('Content-Type') || '';
+  if (!contentType.includes('application/json')) {
+    return new Request(targetUrl, {
+      method: request.method,
+      headers: copyRequestHeaders(request),
+      body: request.body,
+    });
+  }
+
+  const payload = await request.clone().json();
+  const model = typeof payload?.model === 'string' ? payload.model : '';
+  if (model && !model.includes('/') && model.toLowerCase().includes('claude')) {
+    payload.model = `anthropic/${model}`;
+  }
+
+  return new Request(targetUrl, {
+    method: request.method,
+    headers: copyRequestHeaders(request),
+    body: JSON.stringify(payload),
+  });
+}
+
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, _env: Env): Promise<Response> {
     const url = new URL(request.url);
 
     if (request.method === 'OPTIONS') {
@@ -230,7 +263,17 @@ export default {
           );
         }
 
-        return withCors(await proxyRawRequest(request, OPENROUTER_OFFICIAL_BASE_URL), request);
+        const targetUrl = `${OPENROUTER_OFFICIAL_BASE_URL}/api/v1/messages${url.search}`;
+        const upstreamRequest = await buildOpenRouterMessagesRequest(request, targetUrl);
+        const upstreamResponse = await fetch(upstreamRequest, { redirect: 'follow' });
+        return withCors(
+          new Response(upstreamResponse.body, {
+            status: upstreamResponse.status,
+            statusText: upstreamResponse.statusText,
+            headers: upstreamResponse.headers,
+          }),
+          request,
+        );
       } catch (error) {
         return jsonResponse(
           {
